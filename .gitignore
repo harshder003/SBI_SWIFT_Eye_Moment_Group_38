@@ -1,0 +1,17 @@
+# Environments
+venv/
+env/
+.env/
+.venv/
+
+# Python caching
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDEs
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
