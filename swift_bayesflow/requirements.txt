@@ -1,0 +1,12 @@
+bayesflow>=2.0.12
+torch>=2.0          # keras backend used for BayesFlow's networks (torch/tf/jax all work)
+keras>=3.12
+numpy>=1.26
+pandas>=2.0
+matplotlib>=3.8
+pyyaml>=6.0
+
+# Install with:
+#   pip install -r requirements.txt --break-system-packages
+# Then set the Keras backend BEFORE importing bayesflow, e.g.:
+#   export KERAS_BACKEND=torch

@@ -1,0 +1,42 @@
+# Default configuration / hyperparameter reference for the SWIFT-BayesFlow project.
+# The training/inference scripts currently take these as CLI args (see scripts/train.py
+# --help), but they are collected here as a single source of truth for the values used
+# to produce the results in outputs/.
+
+model:
+  use_beta: false        # word-frequency effect (Eq. 4-5) - off by default (paper's own simplification)
+  use_iota: false        # temporal-spatial coupling (Eq. 22) - off by default (baseline model)
+  n_min_words: 6         # sentence length range, matches Risse & Seelig (2019) corpus
+  n_max_words: 12
+  fix_max: 40            # padding cap on fixations per trial
+  duration_scale_ms: 500 # normalization constant for fixation durations fed to the network
+
+priors:                  # uniform priors, taken directly from Engbert & Rabe (2024) Sec. 5
+  nu:   [0.0, 1.0]
+  r:    [0.0, 12.0]
+  muT:  [100.0, 400.0]
+  beta: [0.0, 1.0]
+  iota: [-0.5, 2.0]
+
+network:
+  summary_network: TimeSeriesNetwork   # bayesflow.networks.TimeSeriesNetwork
+  summary_dim: 16
+  recurrent_type: gru
+  recurrent_dim: 128
+  bidirectional: true
+  inference_network: CouplingFlow      # bayesflow.networks.CouplingFlow
+  flow_depth: 6
+  flow_transform: affine
+
+training:
+  epochs: 20             # increase to 100+ for production-quality recovery of nu, r
+  batches_per_epoch: 60
+  batch_size: 64
+  initial_learning_rate: 0.0005
+  backend: torch          # KERAS_BACKEND env var; torch/tensorflow/jax all supported by bayesflow
+
+diagnostics:
+  n_recovery_cases: 150
+  n_posterior_samples: 300
+  n_ppc_trials: 30
+  n_ppc_posterior_draws: 20
