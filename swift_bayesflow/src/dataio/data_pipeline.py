@@ -38,6 +38,12 @@ from typing import Optional
 # Corpus parsing (word properties)
 # ----------------------------------------------------------------------
 
+def _looks_like_header(path: str) -> bool:
+    """Return True when the first line contains alphabetic header names."""
+    with open(path, "r", encoding="utf-8") as fh:
+        first_line = fh.readline()
+    return any(ch.isalpha() for ch in first_line)
+
 def parse_corpus_file(path: str) -> pd.DataFrame:
     """Parse an R-corpus-style .dat file into a DataFrame with (at minimum)
     columns: sentence_id, word_id, word_length, freq.
@@ -48,7 +54,8 @@ def parse_corpus_file(path: str) -> pd.DataFrame:
          position for the common 4..6 column SWIFT corpus layout
     """
     # Strategy 1: has header
-    df = pd.read_csv(path, sep=r"\s+", engine="python")
+    df = pd.read_csv(path, sep=r"\s+", engine="python", quotechar='"')
+    df.columns = [c.strip('"') for c in df.columns]
     lower_cols = {c.lower(): c for c in df.columns}
 
     def find(*candidates):
@@ -57,8 +64,8 @@ def parse_corpus_file(path: str) -> pd.DataFrame:
                 return lower_cols[c]
         return None
 
-    sent_col = find("sentence", "sent", "sentence_id", "sno", "isnr", "sentnr")
-    word_col = find("word", "word_id", "wno", "wordnr", "inr")
+    sent_col = find("sentence", "sent", "sentence_id", "sentid", "sno", "isnr", "sentnr")
+    word_col = find("word", "word_id", "wordid", "wno", "wordnr", "inr")
     len_col = find("length", "wordlength", "nl", "len")
     freq_col = find("freq", "frequency", "wfreq", "lfreq")
 
@@ -73,7 +80,7 @@ def parse_corpus_file(path: str) -> pd.DataFrame:
 
     # Strategy 2: no usable header, assume canonical SWIFT layout
     # (sentence_id, word_id, word_length, freq, ...) by column position
-    raw = pd.read_csv(path, sep=r"\s+", engine="python", header=None)
+    raw = pd.read_csv(path, sep=r"\s+", engine="python", header=None, quotechar='"')
     ncol = raw.shape[1]
     colmap = ["sentence_id", "word_id", "word_length", "freq"][:min(4, ncol)]
     raw = raw.iloc[:, : len(colmap)]
@@ -117,37 +124,50 @@ def parse_fixation_file(path: str) -> pd.DataFrame:
     matching the common SWIFT fixation-sequence layout:
     (sentence_id, fixation_index, word_id, duration, ...)
     """
-    df = pd.read_csv(path, sep=r"\s+", engine="python")
-    lower_cols = {c.lower(): c for c in df.columns}
+    if _looks_like_header(path):
+        df = pd.read_csv(path, sep=r"\s+", engine="python", quotechar='"')
+        df.columns = [c.strip('"') for c in df.columns]
+        lower_cols = {c.lower(): c for c in df.columns}
 
-    def find(*candidates):
-        for c in candidates:
-            if c in lower_cols:
-                return lower_cols[c]
-        return None
+        def find(*candidates):
+            for c in candidates:
+                if c in lower_cols:
+                    return lower_cols[c]
+            return None
 
-    sent_col = find("sentence", "sent", "sentence_id", "sno", "isnr", "trial")
-    fix_col = find("fixation", "fix", "fixnr", "seq", "nfix")
-    word_col = find("word", "word_id", "wordnr", "inr", "fixword")
-    dur_col = find("duration", "dur", "fdur", "time")
+        sent_col = find("sentence", "sent", "sentence_id", "sentid", "sno", "isnr", "trial")
+        fix_col = find("fixation", "fix", "fixnr", "seq", "nfix")
+        word_col = find("word", "word_id", "wordid", "wordnr", "inr", "fixword")
+        dur_col = find("duration", "dur", "fdur", "time")
 
-    if sent_col and word_col and dur_col:
-        out = pd.DataFrame({
-            "sentence_id": df[sent_col].astype(int),
-            "word_id": df[word_col].astype(int),
-            "duration": df[dur_col].astype(float),
-        })
-        out["fixation_index"] = (
-            df[fix_col].astype(int) if fix_col else out.groupby("sentence_id").cumcount() + 1
-        )
-        return out[["sentence_id", "fixation_index", "word_id", "duration"]]
+        if sent_col and word_col and dur_col:
+            out = pd.DataFrame({
+                "sentence_id": df[sent_col].astype(int),
+                "word_id": df[word_col].astype(int),
+                "duration": df[dur_col].astype(float),
+            })
+            out["fixation_index"] = (
+                df[fix_col].astype(int) if fix_col else out.groupby("sentence_id").cumcount() + 1
+            )
+            return out[["sentence_id", "fixation_index", "word_id", "duration"]]
 
-    raw = pd.read_csv(path, sep=r"\s+", engine="python", header=None)
+    raw = pd.read_csv(path, sep=r"\s+", engine="python", header=None, quotechar='"')
     ncol = raw.shape[1]
-    colmap = ["sentence_id", "fixation_index", "word_id", "duration"][:min(4, ncol)]
-    raw = raw.iloc[:, : len(colmap)]
-    raw.columns = colmap
-    return raw
+    if ncol >= 4:
+        # Common SWIFT layout: sentence id, word/landing position, a metadata
+        # column, then fixation duration in ms.
+        raw = raw.iloc[:, [0, 1, 3]].copy()
+    elif ncol == 3:
+        raw = raw.iloc[:, :3].copy()
+    else:
+        raise ValueError(f"Expected at least 3 columns in fixation file, found {ncol}")
+
+    raw.columns = ["sentence_id", "word_id", "duration"]
+    raw["sentence_id"] = raw["sentence_id"].astype(int)
+    raw["word_id"] = raw["word_id"].astype(int)
+    raw["duration"] = raw["duration"].astype(float)
+    raw["fixation_index"] = raw.groupby("sentence_id").cumcount() + 1
+    return raw[["sentence_id", "fixation_index", "word_id", "duration"]]
 
 
 def fixation_df_to_trials(

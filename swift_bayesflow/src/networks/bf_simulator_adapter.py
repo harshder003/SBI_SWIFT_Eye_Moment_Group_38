@@ -44,7 +44,7 @@ N_MIN, N_MAX = 6, 12          # sentence length range (words), matches real corp
 FIX_MAX = 40                  # hard cap on fixations per sentence (padding target)
 DUR_SCALE = 500.0             # ms, rough normalization scale for durations
 K_SENTENCES = 20               # NEW: sentences simulated per "participant" (per theta draw)
-USE_BETA = False              # word-frequency effect off by default (see docstring)
+USE_BETA = True              # word-frequency effect off by default (see docstring)
 USE_IOTA = False              # temporal-spatial coupling off by default
 BOUNDS = SwiftPriorBounds()
 
@@ -102,6 +102,7 @@ def batched_sample_fn(batch_shape, rng: np.random.Generator | None = None) -> di
     out = {"seq": seqs}  # (B, K_SENTENCES, FIX_MAX, 4)
     for j, name in enumerate(PARAM_NAMES):
         out[name] = theta[:, j: j + 1]  # (B, 1) each
+
     return out
 
 
@@ -124,6 +125,12 @@ def make_adapter() -> bf.Adapter:
         bf.Adapter()
         .to_array()
         .convert_dtype("float64", "float32")
+
+        .constrain("nu",   lower=BOUNDS.nu_low,   upper=BOUNDS.nu_high,   method="sigmoid")
+        .constrain("r",    lower=BOUNDS.r_low,    upper=BOUNDS.r_high,    method="sigmoid")
+        .constrain("muT",  lower=BOUNDS.muT_low,  upper=BOUNDS.muT_high,  method="sigmoid")
+        .constrain("beta", lower=BOUNDS.beta_low, upper=BOUNDS.beta_high, method="sigmoid")
+
         .concatenate(PARAM_NAMES, into="inference_variables")
         .rename("seq", "summary_variables")
     )

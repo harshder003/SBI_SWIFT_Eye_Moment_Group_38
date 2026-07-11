@@ -220,7 +220,7 @@ export KERAS_BACKEND=torch      # or tensorflow / jax — bayesflow supports all
 python -m pytest tests/ -v
 
 # train (scale up epochs/batches for real accuracy)
-python -m scripts.train --epochs 100 --batches-per-epoch 200 --batch-size 128
+python -m scripts.train --epochs 50 --batches-per-epoch 20 --batch-size 128
 
 # run inference on real data (put files in data/raw/ first) or the synthetic fallback
 python -m scripts.run_inference \

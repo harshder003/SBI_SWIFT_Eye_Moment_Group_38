@@ -72,6 +72,12 @@ def main():
     print("Loading data...")
     trials, source = load_or_synthesize(args.fixation_file, args.corpus_file)
     print(f"  source={source}, n_trials={len(trials)}")
+    if source != "real":
+        raise RuntimeError(
+            f"Expected real participant data but got source='{source}'. "
+            f"Check --fixation-file/--corpus-file paths: "
+            f"{args.fixation_file}, {args.corpus_file}"
+        )
     trials = trials[: args.max_trials]
 
     print(f"Loading trained approximator from {args.checkpoint} ...")

@@ -202,14 +202,21 @@ def posterior_predictive_check(
     sim_df = pd.DataFrame(sim_rows)
 
     out = []
+    multi_participant = len(real_df) > 1
+
     for measure in real_df.columns:
-        out.append({
+        row = {
             "measure": measure,
             "real_mean": real_df[measure].mean(),
             "sim_mean": sim_df[measure].mean(),
-            "correlation_across_participants": (
-                np.corrcoef(real_df[measure].fillna(0), sim_df[measure].fillna(0))[0, 1]
-                if len(real_df) > 1 else np.nan
-            ),
-        })
+        }
+
+        if multi_participant:
+            row["correlation_across_participants"] = np.corrcoef(
+                real_df[measure].fillna(0),
+                sim_df[measure].fillna(0)
+            )[0, 1]
+
+        out.append(row)
+
     return pd.DataFrame(out)
