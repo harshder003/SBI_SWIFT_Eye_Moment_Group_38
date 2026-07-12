@@ -137,7 +137,8 @@ def make_adapter() -> bf.Adapter:
     return adapter
 
 
-def build_condition_batch_multi(participant_trials: list[list[dict]]) -> dict:
+def build_condition_batch_multi(participant_trials: list[list[dict]],
+                                 seed: int = 0) -> dict:
     """Helper for inference time: build a (num_participants, K, FIX_MAX, 4)
     'seq' tensor from REAL data, where `participant_trials` is a list (one
     entry per participant) of lists of trial-dicts (each trial-dict has
@@ -145,9 +146,12 @@ def build_condition_batch_multi(participant_trials: list[list[dict]]) -> dict:
 
     If a participant has fewer than K_SENTENCES real trials, sentences are
     resampled with replacement to fill K_SENTENCES (documented in README);
-    if more, a random subset of K_SENTENCES is used.
+    if more, a random subset of K_SENTENCES is used - pass different `seed`
+    values across repeated calls to average over multiple random subsets
+    instead of discarding the rest of a participant's real sentences (see
+    run_inference.py's --n-resamples option).
     """
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(seed)
     batch_size = len(participant_trials)
     seqs = np.zeros((batch_size, K_SENTENCES, FIX_MAX, 4), dtype=np.float32)
     for b, trials in enumerate(participant_trials):

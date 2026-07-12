@@ -29,22 +29,33 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import torch
 
 from src.networks.build_workflow import build_workflow
 from src.networks.bf_simulator_adapter import PARAM_NAMES
 from src.diagnostics.diagnostics import parameter_recovery, recovery_summary
 
 
+def setup_device():
+    if torch.cuda.is_available():
+        print("CUDA is available! Setting PyTorch to use GPU.")
+        torch.set_default_device("cuda")
+    else:
+        print("CUDA is NOT available. PyTorch will use CPU.")
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Train the SWIFT BayesFlow amortizer")
-    p.add_argument("--epochs", type=int, default=20)
-    p.add_argument("--batches-per-epoch", type=int, default=100)
+    p.add_argument("--epochs", type=int, default=80)          # raised from 20 - early stopping cuts it short
+    p.add_argument("--batches-per-epoch", type=int, default=25)  # keep at 20-25, not 100 (too slow/epoch)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--summary-dim", type=int, default=16)
     p.add_argument("--flow-depth", type=int, default=6)
     p.add_argument("--lr", type=float, default=5e-4)
-    p.add_argument("--n-recovery-cases", type=int, default=150)
-    p.add_argument("--n-posterior-samples", type=int, default=500)
+    p.add_argument("--n-recovery-cases", type=int, default=250)      # was 150 - less noisy diagnostics
+    p.add_argument("--n-posterior-samples", type=int, default=1000)  # was 500
+    p.add_argument("--val-participants", type=int, default=200)      # held-out validation batch size
+    p.add_argument("--patience", type=int, default=15)               # early stopping patience (epochs)
     p.add_argument("--outdir", type=str, default="outputs")
     p.add_argument("--seed", type=int, default=0)
     return p.parse_args()
@@ -78,6 +89,8 @@ def main():
     os.makedirs(os.path.join(args.outdir, "figures"), exist_ok=True)
     os.makedirs(os.path.join(args.outdir, "checkpoints"), exist_ok=True)
 
+    setup_device()
+
     print("=" * 70)
     print("Building SWIFT BayesFlow workflow")
     print("=" * 70)
@@ -91,26 +104,58 @@ def main():
 
     print("=" * 70)
     print(f"Training: {args.epochs} epochs x {args.batches_per_epoch} batches "
-          f"x batch_size={args.batch_size}")
+          f"x batch_size={args.batch_size}  (early stopping patience={args.patience})")
     print("=" * 70)
-    t0 = time.time()
-    history = workflow.fit_online(
-        epochs=args.epochs,
-        num_batches_per_epoch=args.batches_per_epoch,
-        batch_size=args.batch_size,
+    import keras
+    early_stop = keras.callbacks.EarlyStopping(
+        monitor="val_loss", patience=args.patience, restore_best_weights=True,
     )
-    print(f"Training completed in {time.time() - t0:.1f}s")
 
-    loss_curve = np.asarray(history.history["loss"])
-    np.save(os.path.join(args.outdir, "loss_curve.npy"), loss_curve)
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(loss_curve)
-    ax.set_xlabel("epoch")
-    ax.set_ylabel("negative log-likelihood (loss)")
-    ax.set_title("Training loss")
-    fig.tight_layout()
-    fig.savefig(os.path.join(args.outdir, "figures", "loss_curve.png"), dpi=150)
-    plt.close(fig)
+    t0 = time.time()
+    val_loss_curve = np.array([])
+    try:
+        history = workflow.fit_online(
+            epochs=args.epochs,
+            num_batches_per_epoch=args.batches_per_epoch,
+            batch_size=args.batch_size,
+            validation_data=args.val_participants,   # int -> auto-generates held-out val batch
+            callbacks=[early_stop],
+        )
+        loss_curve = history.history.get("loss", [])
+        val_loss_curve = np.asarray(history.history.get("val_loss", []))
+        print(f"Training completed in {time.time() - t0:.1f}s "
+              f"({len(loss_curve)} epochs actually run)")
+    except KeyboardInterrupt:
+        print("\nTraining interrupted by user. Stopping gracefully...")
+        loss_curve = []
+        if hasattr(workflow, "approximator") and hasattr(workflow.approximator, "history"):
+            if workflow.approximator.history is not None:
+                loss_curve = workflow.approximator.history.history.get("loss", [])
+                val_loss_curve = np.asarray(
+                    workflow.approximator.history.history.get("val_loss", [])
+                )
+        # Diagnostics below run on the weights as of the interrupted epoch
+        # (or the best-so-far weights if EarlyStopping's restore_best_weights
+        # already kicked in before the interrupt).
+        print(f"Training stopped after {time.time() - t0:.1f}s")
+
+    loss_curve = np.asarray(loss_curve)
+    if len(loss_curve) > 0:
+        np.save(os.path.join(args.outdir, "loss_curve.npy"), loss_curve)
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.plot(loss_curve, label="train")
+        if len(val_loss_curve) > 0:
+            np.save(os.path.join(args.outdir, "val_loss_curve.npy"), val_loss_curve)
+            ax.plot(val_loss_curve, label="val")
+            ax.legend()
+        ax.set_xlabel("epoch")
+        ax.set_ylabel("negative log-likelihood (loss)")
+        ax.set_title("Training loss")
+        fig.tight_layout()
+        fig.savefig(os.path.join(args.outdir, "figures", "loss_curve.png"), dpi=150)
+        plt.close(fig)
+    else:
+        print("No completed epochs to plot loss curve.")
 
     print("=" * 70)
     print(f"Parameter recovery on {args.n_recovery_cases} held-out simulated trials")

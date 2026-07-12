@@ -50,6 +50,9 @@ def parse_args():
     p.add_argument("--outdir", type=str, default="outputs")
     p.add_argument("--max-trials", type=int, default=200,
                     help="cap number of real trials used (for speed / memory)")
+    p.add_argument("--n-resamples", type=int, default=10,
+                    help="number of random K_SENTENCES-subsets of the real participant's "
+                         "trials to pool the posterior over (see run_inference.py comment)")
     return p.parse_args()
 
 
@@ -84,16 +87,29 @@ def main():
     approximator = keras.saving.load_model(args.checkpoint, custom_objects={'MultiSentenceSummaryNetwork': MultiSentenceSummaryNetwork})
     workflow = _WF(approximator)
 
-    # ---- ONE posterior for the whole participant, conditioned on their
-    #      full (resampled-to-K_SENTENCES) batch of sentences ----
-    conditions = build_condition_batch_multi([trials])  # (1, K_SENTENCES, FIX_MAX, 4)
-    print(f"Sampling {args.n_posterior_samples} posterior draws for this participant "
-          f"(pooled over {len(trials)} real trials, resampled to K_SENTENCES per call)...")
-    post = workflow.sample(num_samples=args.n_posterior_samples, conditions=conditions)
+    # ---- Pool the posterior over MULTIPLE random resamples of the real
+    #      participant's sentences, instead of one fixed K_SENTENCES=20
+    #      subset. With 114 real sentences and K_SENTENCES=20, a single
+    #      call only ever looks at ~18% of the real data and silently
+    #      discards the rest; repeating with different random subsets and
+    #      concatenating the resulting posterior draws uses much more of
+    #      what we actually have and reduces sensitivity to which 20
+    #      sentences happened to get picked. ----
+    n_draws_per_resample = max(1, args.n_posterior_samples // args.n_resamples)
+    print(f"Sampling {args.n_resamples} x {n_draws_per_resample} posterior draws "
+          f"(pooled over {args.n_resamples} random {min(len(trials), 20)}-sentence "
+          f"subsets of this participant's {len(trials)} real trials)...")
+    post_chunks = {p: [] for p in PARAM_NAMES}
+    for r in range(args.n_resamples):
+        conditions = build_condition_batch_multi([trials], seed=r)
+        post_r = workflow.sample(num_samples=n_draws_per_resample, conditions=conditions)
+        for p in PARAM_NAMES:
+            post_chunks[p].append(np.asarray(post_r[p]).reshape(-1))
+    post = {p: np.concatenate(v) for p, v in post_chunks.items()}
 
     rows = []
     for p in PARAM_NAMES:
-        samples = np.asarray(post[p]).reshape(-1)
+        samples = post[p]
         q05, q50, q95 = np.quantile(samples, [0.05, 0.5, 0.95])
         rows.append({
             "param": p,
@@ -110,7 +126,7 @@ def main():
     if len(PARAM_NAMES) == 1:
         axes = [axes]
     for ax, p in zip(axes, PARAM_NAMES):
-        samples = np.asarray(post[p]).reshape(-1)
+        samples = post[p]
         ax.hist(samples, bins=40, density=True, alpha=0.7)
         ax.set_title(f"Posterior: {p}")
         ax.set_xlabel(p)

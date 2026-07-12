@@ -29,14 +29,19 @@ network:
   flow_transform: affine
 
 training:
-  epochs: 20             # increase to 100+ for production-quality recovery of nu, r
-  batches_per_epoch: 60
+  epochs: 80              # raised from 20 - early stopping (patience 15) will cut it short once val_loss plateaus
+  batches_per_epoch: 25
   batch_size: 64
   initial_learning_rate: 0.0005
+  val_participants: 200   # held-out validation batch for early stopping
+  patience: 15
   backend: torch          # KERAS_BACKEND env var; torch/tensorflow/jax all supported by bayesflow
 
 diagnostics:
-  n_recovery_cases: 150
-  n_posterior_samples: 300
+  n_recovery_cases: 250   # raised from 150 - less noisy recovery/PPC diagnostics
+  n_posterior_samples: 1000
   n_ppc_trials: 30
   n_ppc_posterior_draws: 20
+  n_resamples: 10          # NEW: pool posterior over this many random 20-sentence subsets
+                            # of the real participant's data at inference time (see
+                            # scripts/run_inference.py) instead of discarding ~82% of it
