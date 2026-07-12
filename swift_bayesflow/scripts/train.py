@@ -179,6 +179,5 @@ def main():
     print(f"  - {args.outdir}/figures/loss_curve.png")
     print("=" * 70)
 
-
 if __name__ == "__main__":
     main()
