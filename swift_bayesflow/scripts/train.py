@@ -30,6 +30,15 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+import torch
+
+def setup_device():
+    if torch.cuda.is_available():
+        print("CUDA is available! Setting PyTorch to use GPU.")
+        torch.set_default_device("cuda")
+    else:
+        print("CUDA is NOT available. PyTorch will use CPU.")
+
 from src.networks.build_workflow import build_workflow
 from src.networks.bf_simulator_adapter import PARAM_NAMES
 from src.diagnostics.diagnostics import parameter_recovery, recovery_summary
@@ -78,6 +87,8 @@ def main():
     os.makedirs(os.path.join(args.outdir, "figures"), exist_ok=True)
     os.makedirs(os.path.join(args.outdir, "checkpoints"), exist_ok=True)
 
+    setup_device()
+
     print("=" * 70)
     print("Building SWIFT BayesFlow workflow")
     print("=" * 70)
@@ -94,23 +105,37 @@ def main():
           f"x batch_size={args.batch_size}")
     print("=" * 70)
     t0 = time.time()
-    history = workflow.fit_online(
-        epochs=args.epochs,
-        num_batches_per_epoch=args.batches_per_epoch,
-        batch_size=args.batch_size,
-    )
-    print(f"Training completed in {time.time() - t0:.1f}s")
+    try:
+        history = workflow.fit_online(
+            epochs=args.epochs,
+            num_batches_per_epoch=args.batches_per_epoch,
+            batch_size=args.batch_size,
+        )
+        loss_curve = history.history.get("loss", [])
+    except KeyboardInterrupt:
+        print("\nTraining interrupted by user. Stopping gracefully...")
+        loss_curve = []
+        if hasattr(workflow, "approximator") and hasattr(workflow.approximator, "history"):
+            if workflow.approximator.history is not None:
+                loss_curve = workflow.approximator.history.history.get("loss", [])
+        # We evaluate parameter recovery on the weights from the interrupted epoch.
+        # Alternatively, you could load the last saved checkpoint if preferred.
 
-    loss_curve = np.asarray(history.history["loss"])
-    np.save(os.path.join(args.outdir, "loss_curve.npy"), loss_curve)
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(loss_curve)
-    ax.set_xlabel("epoch")
-    ax.set_ylabel("negative log-likelihood (loss)")
-    ax.set_title("Training loss")
-    fig.tight_layout()
-    fig.savefig(os.path.join(args.outdir, "figures", "loss_curve.png"), dpi=150)
-    plt.close(fig)
+    print(f"Training stopped after {time.time() - t0:.1f}s")
+
+    loss_curve = np.asarray(loss_curve)
+    if len(loss_curve) > 0:
+        np.save(os.path.join(args.outdir, "loss_curve.npy"), loss_curve)
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.plot(loss_curve)
+        ax.set_xlabel("epoch")
+        ax.set_ylabel("negative log-likelihood (loss)")
+        ax.set_title("Training loss")
+        fig.tight_layout()
+        fig.savefig(os.path.join(args.outdir, "figures", "loss_curve.png"), dpi=150)
+        plt.close(fig)
+    else:
+        print("No completed epochs to plot loss curve.")
 
     print("=" * 70)
     print(f"Parameter recovery on {args.n_recovery_cases} held-out simulated trials")
