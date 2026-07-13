@@ -69,6 +69,36 @@ def recovery_summary(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
+def parameter_recovery_arrays(workflow, n_test: int = 250, n_posterior_samples: int = 1000,
+                               seed: int = 123):
+    """Same simulation-based-calibration setup as `parameter_recovery()`
+    above, but returns the RAW posterior draws and true parameter arrays
+    (rather than only summary statistics), in exactly the shape BayesFlow's
+    built-in diagnostic plots expect:
+
+        estimates : (n_test, n_posterior_samples, n_params)
+        targets   : (n_test, n_params)
+
+    Feed these directly into bf.diagnostics.calibration_ecdf(...) and
+    bf.diagnostics.coverage(...) for simulation-based calibration (SBC)
+    checks - see scripts/train.py.
+    """
+    sim = make_swift_simulator()
+    batch = sim.sample(n_test)  # batch["seq"] has shape (n_test, K_SENTENCES, FIX_MAX, 4)
+
+    estimates = np.zeros((n_test, n_posterior_samples, len(PARAM_NAMES)), dtype=np.float32)
+    targets = np.zeros((n_test, len(PARAM_NAMES)), dtype=np.float32)
+
+    for i in range(n_test):
+        conditions = {"seq": batch["seq"][i: i + 1]}
+        post = workflow.sample(num_samples=n_posterior_samples, conditions=conditions)
+        for j, p in enumerate(PARAM_NAMES):
+            estimates[i, :, j] = np.asarray(post[p]).reshape(-1)
+            targets[i, j] = float(batch[p][i, 0])
+
+    return estimates, targets
+
+
 # ----------------------------------------------------------------------
 # Posterior predictive checks against behavioral summary measures
 # (mirrors the paper's Fig. 9: SFD, gaze duration, total fixation time,

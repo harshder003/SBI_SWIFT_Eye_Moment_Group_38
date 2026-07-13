@@ -33,7 +33,10 @@ import torch
 
 from src.networks.build_workflow import build_workflow
 from src.networks.bf_simulator_adapter import PARAM_NAMES
-from src.diagnostics.diagnostics import parameter_recovery, recovery_summary
+from src.diagnostics.diagnostics import (
+    parameter_recovery, recovery_summary, parameter_recovery_arrays,
+)
+import bayesflow as bf  # NEW: needed for bf.diagnostics.calibration_ecdf / coverage
 
 
 def setup_device():
@@ -171,12 +174,40 @@ def main():
 
     plot_recovery(rec_df, args.outdir)
 
+    # ---- NEW: Simulation-based calibration (SBC) - ECDF + coverage plots ----
+    print("=" * 70)
+    print("Simulation-based calibration (SBC): ECDF + coverage plots")
+    print("=" * 70)
+    # Reuses the same simulation-based-calibration setup as parameter_recovery()
+    # above, but keeps the RAW posterior draws (rather than just summary
+    # stats) in the (n_test, n_draws, n_params) / (n_test, n_params) shape
+    # BayesFlow's built-in diagnostics expect.
+    estimates, targets = parameter_recovery_arrays(
+        workflow, n_test=args.n_recovery_cases,
+        n_posterior_samples=args.n_posterior_samples, seed=args.seed + 2,
+    )
+
+    fig_ecdf = bf.diagnostics.calibration_ecdf(
+        estimates, targets, variable_names=PARAM_NAMES, figsize=(4 * len(PARAM_NAMES), 4),
+    )
+    fig_ecdf.savefig(os.path.join(args.outdir, "figures", "sbc_ecdf.png"), dpi=150)
+    plt.close(fig_ecdf)
+
+    fig_cov = bf.diagnostics.coverage(
+        estimates, targets, variable_names=PARAM_NAMES, figsize=(4 * len(PARAM_NAMES), 4),
+    )
+    fig_cov.savefig(os.path.join(args.outdir, "figures", "sbc_coverage.png"), dpi=150)
+    plt.close(fig_cov)
+    # ---- END NEW ----
+
     print("=" * 70)
     print("Saved:")
     print(f"  - {checkpoint_path}/swift_bayesflow.keras (weights)")
     print(f"  - {args.outdir}/recovery_summary.csv")
     print(f"  - {args.outdir}/figures/recovery_scatter.png")
     print(f"  - {args.outdir}/figures/loss_curve.png")
+    print(f"  - {args.outdir}/figures/sbc_ecdf.png")
+    print(f"  - {args.outdir}/figures/sbc_coverage.png")
     print("=" * 70)
 
 if __name__ == "__main__":
